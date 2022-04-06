@@ -1,0 +1,256 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+# Load libraries
+```{r}
+library("tidyverse")
+library("ggplot2")
+library("ggfortify")
+library("vsn")
+library("limma")
+```
+
+# load data
+```{r}
+load("C:/DATA STORAGE/Projects/ADNI/Data RAW/CSF_Proteomics_ADNI.Rdata")
+# results dat.pr
+data = dat.pr
+rm(dat.pr)
+# work with data
+```
+
+
+# Explore data
+```{r}
+Pheno = data[,1:7]
+data =  data[,-c(1:7)]
+
+# dimentions
+dim(data)
+# 135 samples ROWS
+# 320 features COLS
+
+# raw values to work with
+hist(unlist(data), main="all values")
+# ranging between -10 ... 30 ish
+# bimodal, peak at 0 and 18 roughly.
+# main peak absolutely overwhelming at 18 compared to 0
+
+# boxplot
+boxplot(t(data), main="boxplot all values per sample")
+#looks rough, could be better normalized, should check if this is normalized or not
+
+# densities raw
+plot(density(t(data)[,1]),col="white")
+apply(data,1,function(x){ lines(density(x),col=alpha("black",0.1)) })
+# looks ok given no normalization (assuming)
+
+# densities per 2 class
+plot(density(t(data)[,1]),col="white")
+apply(data[Pheno$binary_class=="stable",],1,function(x){ lines(density(x),col=alpha("green",0.1)) })
+apply(data[Pheno$binary_class!="stable",],1,function(x){ lines(density(x),col=alpha("red",0.1)) })
+# no detectable shifts or patterns
+
+
+# densities per 3 class
+plot(density(t(data)[,1]),col="white")
+apply(data[Pheno$three_class=="stable",],1,function(x){ lines(density(x),col=alpha("green",0.1)) })
+apply(data[Pheno$three_class!="slowDecline",],1,function(x){ lines(density(x),col=alpha("orange",0.1)) })
+apply(data[Pheno$three_class!="rapidDecline",],1,function(x){ lines(density(x),col=alpha("red",0.1)) })
+# no detectable shifts or patterns
+
+# Check heteroskedasticity 
+plot(apply(data,2,mean),y=apply(data,2,sd))
+
+# Check how 'deviators of sd' are caused
+# first isolate all features deviating
+# then evaluate in boxplot
+boxplot(data[,names(which(apply(data,2,sd)>1))])
+# seems many of the values have negative values to them...
+# This is odd? Why would this be the case?
+# Thinkng about this, these are log-normalized intensities.
+# likely extremely low values:
+# (log)value of 10 -> 1000 in raw intensity
+# (log)value of -3 -> 0.1 in raw intensity
+# Maybe related to the phenotype?
+
+# Checking sd per phenotype class, should be roughly normally distributed
+# Checing binary
+temp_dat = data[Pheno$binary_class=="stable",]
+boxplot(temp_dat[,names(which(apply(temp_dat,2,sd)>1))])
+# still exists
+temp_dat = data[Pheno$binary_class!="stable",]
+boxplot(temp_dat[,names(which(apply(temp_dat,2,sd)>1))])
+# still exists
+
+# Checking 3class
+temp_dat = data[Pheno$three_class=="stable",]
+boxplot(temp_dat[,names(which(apply(temp_dat,2,sd)>1))])
+# still exists
+temp_dat = data[Pheno$three_class=="slowDecline",]
+boxplot(temp_dat[,names(which(apply(temp_dat,2,sd)>1))])
+# still exists
+temp_dat = data[Pheno$three_class=="rapidDecline",]
+boxplot(temp_dat[,names(which(apply(temp_dat,2,sd)>1))])
+# still exists
+
+# SD problem / low values seems persistent!
+# >> maybe impute relative low values based on phenotype:class
+# OR
+# >> remove the deviating features (if not predictive)
+```
+# Normalize
+Using variance stabilization normalization (Vsn) check out [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5862339/).
+Data is already power-transformed. (basically logy(x), where y produces the best normal fit). vsn assumes raw intensities 
+```{r}
+vsn_fit = vsn::vsn2(t(as.matrix(2^data)))
+data_norm = t(predict(vsn_fit, newdata=t(as.matrix(2^data))))  ## apply fit
+
+# check the sd/meabn
+vsn::meanSdPlot(t(data))
+vsn::meanSdPlot(t(data_norm))
+
+boxplot(t(data), main="boxplot all values per sample, unnormalized")
+boxplot(t(data_norm), main="boxplot all values per sample, vsn normalized")
+# Thats more stable
+
+# replace data because im lazy
+data = data_norm
+```
+
+# Recheck data
+```{r}
+
+# raw values to work with
+hist(unlist(data), main="all values")
+# ranging between -10 ... 30 ish
+# bimodal, peak at 0 and 18 roughly.
+# main peak absolutely overwhelming at 18 compared to 0
+
+# boxplot
+boxplot(t(data), main="boxplot all values per sample")
+#looks rough, could be better normalized, should check if this is normalized or not
+
+# densities raw
+plot(density(t(data)[,1]),col="white")
+apply(data,1,function(x){ lines(density(x),col=alpha("black",0.1)) })
+# looks ok given no normalization (assuming)
+
+# densities per 2 class
+plot(density(t(data)[,1]),col="white")
+apply(data[Pheno$binary_class=="stable",],1,function(x){ lines(density(x),col=alpha("green",0.1)) })
+apply(data[Pheno$binary_class!="stable",],1,function(x){ lines(density(x),col=alpha("red",0.1)) })
+# no detectable shifts or patterns
+
+
+# densities per 3 class
+plot(density(t(data)[,1]),col="white")
+apply(data[Pheno$three_class=="stable",],1,function(x){ lines(density(x),col=alpha("green",0.3)) })
+apply(data[Pheno$three_class!="slowDecline",],1,function(x){ lines(density(x),col=alpha("orange",0.3)) })
+apply(data[Pheno$three_class!="rapidDecline",],1,function(x){ lines(density(x),col=alpha("red",0.3)) })
+# no detectable shifts or patterns
+
+# Check heteroskedasticity 
+plot(apply(data,2,mean),y=apply(data,2,sd))
+
+# In final, way better!
+```
+
+# PCA with phenocolors
+```{r}
+PCA = prcomp(data,scale=TRUE)
+
+autoplot(PCA,col=as.numeric(Pheno$binary_class))
+autoplot(PCA,col=as.numeric(Pheno$three_class))
+```
+
+# limma Differential expression
+## Binary
+This is a rip form another script; it might not make sense in terms of comments
+```{r de-binary}
+# Make design matrix formula
+s_CovFormulaImportantSV = paste0("~ 0 + binary_class ")
+
+# make design matrix
+temp_design <- model.matrix(as.formula(s_CovFormulaImportantSV),data=Pheno)
+colnames(temp_design) = make.names(colnames(temp_design))
+
+# Make LMmodel and mod t test
+fit <- lmFit(t(data),temp_design)
+
+  # Show the coefs for first gene
+data.frame(fit$coef[1,])
+
+temp_contrast_matrix <- makeContrasts(
+	decliner_vs_stable = binary_classdecliner-binary_classstable,
+	levels = colnames(temp_design))
+	 
+	 
+	 
+fit2 <- contrasts.fit(fit, temp_contrast_matrix)
+
+fit2 <- eBayes(fit2,trend=TRUE)
+
+f_show_results = function(s_coeff){
+  # get results
+    #A_Time
+  DE_res = topTable(fit2, coef=s_coeff, num=Inf,sort.by = "P", adjust="BH", lfc=0)
+ 
+  
+  hist(DE_res$P.Value ,xlim=c(0,1),main=s_coeff)
+  hist(DE_res$adj.P.Val ,xlim=c(0,1),main=s_coeff)
+  min(DE_res$adj.P.Val)
+  cat(paste0("Contrast: ",s_coeff,".\n  number of features below TH (0.05)\n  Pval:",sum(DE_res$P.Value<0.05)," (",round((sum(DE_res$P.Value<0.05)/dim(DE_res)[1])*100,0),"%)","\n  AdjPval:",sum(DE_res$adj.P.Val<0.05)," (",round((sum(DE_res$adj.P.Val<0.05)/dim(DE_res)[1])*100,0),"%)","\n"))
+  
+  # top 10
+  print(head(DE_res,n=10))
+  cat(paste0("\n\n"))
+  
+  # volcano
+  fdrset = DE_res$adj.P.Val<0.05
+  plot(x=DE_res$logFC,y=-log10(DE_res$P.Value),pch=ifelse(fdrset,19,1),col=ifelse(fdrset,"black","gray80"))
+  abline(h=-log10(0.05),col="black",lty=2)
+  abline(v=-log(1.2),col="black",lty=2) #FC 1.2
+  abline(v=log(1.2),col="black",lty=2) #FC 1.2
+  
+}
+
+f_show_results("decliner_vs_stable")
+
+```
+
+## Three-class
+
+```{r de-three-class}
+# Make design matrix formula
+s_CovFormulaImportantSV = paste0("~ 0 + three_class ")
+
+# make design matrix
+temp_design <- model.matrix(as.formula(s_CovFormulaImportantSV),data=Pheno)
+colnames(temp_design) = make.names(colnames(temp_design))
+
+# Make LMmodel and mod t test
+fit <- lmFit(t(data),temp_design)
+
+  # Show the coefs for first gene
+data.frame(fit$coef[1,])
+
+temp_contrast_matrix <- makeContrasts(
+	slow_vs_stable = three_classslowDecline-three_classstable,
+	fast_vs_stable = three_classrapidDecline-three_classstable,
+	fast_vs_slow = three_classrapidDecline-three_classslowDecline,
+	levels = colnames(temp_design))
+	 
+	 
+	 
+fit2 <- contrasts.fit(fit, temp_contrast_matrix)
+
+fit2 <- eBayes(fit2,trend=TRUE)
+
+f_show_results("slow_vs_stable")# 44 / 0  # Shown as Pval / adjP
+f_show_results("fast_vs_stable") # 71 / 39 
+f_show_results("fast_vs_slow")# 16 / 0 
+```
